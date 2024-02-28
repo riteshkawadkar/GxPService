@@ -1,6 +1,6 @@
 ﻿namespace GxPService
 {
-    partial class Service1
+    partial class GxpService
     {
         /// <summary> 
         /// Required designer variable.
