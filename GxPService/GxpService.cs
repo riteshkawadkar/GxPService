@@ -6,8 +6,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Security.Principal;
 using System.ServiceProcess;
+using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
 
@@ -43,11 +43,6 @@ namespace GxPService
             timer.Start();
         }
 
-        public void OnDebug()
-        {
-            OnStart(null);
-        }
-
         protected override void OnStop()
         {
             WriteLog("Service is stopped at " + DateTime.Now);
@@ -56,13 +51,53 @@ namespace GxPService
         private async Task TimerElapsedEventHandlerAsync(object sender, ElapsedEventArgs e)
         {            
             //Fetch Endpoint from HKLM
-            var apiEndpoint = GetApiEndpointFromRegistry();
+            apiEndpoint = GetApiEndpointFromRegistry();
 
             // Make a request to the server to get the latest policies
             string policies = await GetPoliciesFromServer(apiEndpoint);
 
             // Process the received policies
             ApplyPolicy(policies);
+
+            // Send data to API
+            //await SendDataToApi();
+            
+        }
+
+        private async Task SendDataToApi()
+        {
+            var currentUsername = WindowsIdentityHelper.GetLoggedOnUsers().FirstOrDefault();
+
+            // Get machine name
+            string machineName = Environment.MachineName;
+
+            // Create data payload
+            var requestData = new { Username = currentUsername.Name, MachineName = machineName };
+
+            try
+            {
+                using (HttpClient client = new HttpClient())
+                {
+                    // Serialize the requestData object to JSON
+                    string jsonRequestData = JsonConvert.SerializeObject(requestData);
+
+                    // Create StringContent from the JSON data
+                    var content = new StringContent(jsonRequestData, Encoding.UTF8, "application/json");
+
+                    // Specify the URI of the API endpoint
+                    string apiUrl = "https://yourapi.com/api/usercount"; // Replace with your actual API endpoint
+
+                    // Send POST request to API
+                    HttpResponseMessage response = await client.PostAsync(apiUrl, content);
+
+                    response.EnsureSuccessStatusCode();
+                }
+            }
+            catch (Exception ex)
+            {
+                // Handle error
+                Console.WriteLine($"Error sending data to API: {ex.Message}");
+            }
         }
 
 
@@ -71,7 +106,7 @@ namespace GxPService
             WriteLog("Fetching API Endpoint from Registry");
 
             // Open the registry key
-            using (RegistryKey key = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\VShield\Service", "", null) as RegistryKey)
+            using (RegistryKey key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\VShield\Service"))
             {
                 // Check if the key exists
                 if (key != null)
@@ -81,9 +116,10 @@ namespace GxPService
                 }
             }
 
-            WriteLog("API Endpoint = " + apiEndpoint);
+            WriteLog("API Endpoint = " + (apiEndpoint ?? "Not Found"));
             return apiEndpoint;
         }
+
 
         public async Task<string> GetPoliciesFromServer(string url)
         {
@@ -102,20 +138,23 @@ namespace GxPService
                     {
                         string message = $"HTTP request failed with status code {response.StatusCode}";
                         WriteLog($"Error: {message}");
-                        throw new HttpRequestException(message);
+                        return "";
                     }
                 }
             }
             catch (Exception ex)
             {
                 WriteLog("Error: " + ex.Message);
-                throw new Exception("Error: " + ex.Message);
+                return "";
             }
         }
 
         public void ApplyPolicy(string policies)
         {
             var registryPolicies = JsonConvert.DeserializeObject<List<PolicyDto>>(policies);
+            var user = WindowsIdentityHelper.GetLoggedOnUsers().FirstOrDefault();
+            WriteLog($"Current User: {user.Name}");
+            WriteLog($"Current User SID: {user.Owner.Value}");
 
             foreach (var registryPolicy in registryPolicies)
             {
@@ -129,55 +168,52 @@ namespace GxPService
                 var operatingSystem = OSVersion.GetOperatingSystem();
                 if (!osVersions.Contains(operatingSystem.ToString()))
                 {
-                    WriteLog($"Current OS is not compatible for policy. Policy ID: {registryPolicy.PolicyUID}");
-                    throw new Exception($"Current OS is not compatible for policy. Policy ID: {registryPolicy.PolicyUID}");
+                    WriteLog($"Current OS is not compatible for policy. Policy: {registryEntry}");
+                    continue;
                 }
 
+                WriteLog($"Applying Policy: {registryEntry}, Writing {registryPolicy.RegType} value: {registryValue}");
 
-                WindowsIdentity identity = WindowsIdentity.GetCurrent();
-                string sidString = identity.User.Value;
-                WriteLog("Current User SID: " + sidString);
-                SecurityIdentifier sid = new SecurityIdentifier(sidString);
-                NTAccount account = (NTAccount)sid.Translate(typeof(NTAccount));
-                WriteLog("Current User Name: " + account.Value);
-
-                string rootKey = @"HKEY_USERS\" + sid;
-                string fullKey = $"{rootKey}\\registryPath";
-
-
-                switch (registryPolicy.RegType)
+                try
                 {
-                    case "REG_DWORD":
-                        int intValue;
-                        if (int.TryParse(registryValue, out intValue))
-                        {
-                            Registry.SetValue(fullKey, registryEntry, intValue, RegistryValueKind.DWord);
-                        }
-                        else
-                        {
-                            WriteLog($"Invalid REG_DWORD value: {intValue}");
-                        }
-                        break;
-                    case "REG_STRING":
-                        WriteLog("Applying String value...");
-                        Registry.SetValue(fullKey, registryEntry, registryValue, RegistryValueKind.String);
-                        break;
-                    case "REG_BINARY":
-                        WriteLog($"Applying Binary value...");
-                        string val = registryValue.Replace("hex:", "");
-                        WriteLog($"Val: {val}");
-                        var data = val.Split(',')
-                                .Select(x => Convert.ToByte(x, 16))
-                                .ToArray();
-                        WriteLog($"Value: {data}");
-                        Registry.SetValue(fullKey, registryEntry, data, RegistryValueKind.Binary);
-                        WriteLog($"Value written");
-                        break;
-                    default:
-                        // Handle the case when RegType does not match any known types
-                        // You could throw an exception, set a default value, or log an error.
-                        // For example:
-                        throw new ArgumentException("Unknown registry value type: " + registryPolicy.RegType);
+                    string rootKey = @"HKEY_USERS\" + user.Owner.Value;
+                    string fullKey = $"{rootKey}\\{registryPath}";
+
+                    switch (registryPolicy.RegType)
+                    {
+                        case "REG_DWORD":
+                            int intValue;
+                            if (int.TryParse(registryValue, out intValue))
+                            {
+                                Registry.SetValue(fullKey, registryEntry, intValue, RegistryValueKind.DWord);
+                            }
+                            else
+                            {
+                                WriteLog($"Invalid REG_DWORD value: {intValue}");
+                            }
+                            break;
+
+                        case "REG_STRING":
+                            Registry.SetValue(fullKey, registryEntry, registryValue, RegistryValueKind.String);
+                            break;
+
+                        case "REG_BINARY":
+                            string val = registryValue.Replace("hex:", "");
+                            var data = val.Split(',')
+                                    .Select(x => Convert.ToByte(x, 16))
+                                    .ToArray();
+                            Registry.SetValue(fullKey, registryEntry, data, RegistryValueKind.Binary);
+                            break;
+
+                        default:
+                            WriteLog($"Unknown registry value type: {registryPolicy.RegType}");
+                            break;
+                    }                    
+                }
+                catch (Exception ex)
+                {
+                    WriteLog(ex.GetBaseException().Message);
+                    WriteLog(ex.Message);
                 }
             }
         }
