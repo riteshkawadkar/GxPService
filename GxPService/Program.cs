@@ -14,18 +14,12 @@ namespace GxPService
         /// </summary>
         static void Main()
         {
-#if DEBUG
-            new GxpService();
-            //var myService = new MyService();
-            //myService.ShowToastNotification("SUCCESS", "This is a success message");
-#else
             ServiceBase[] ServicesToRun;
             ServicesToRun = new ServiceBase[]
             {
                 new GxpService()
             };
             ServiceBase.Run(ServicesToRun);
-#endif
         }
     }
 }

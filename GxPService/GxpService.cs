@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32;
+﻿using GxPService.Dto;
+using Microsoft.Win32;
 using Newtonsoft.Json;
 using OSVersionExtension;
 using System;
@@ -6,6 +7,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Threading.Tasks;
@@ -149,72 +151,113 @@ namespace GxPService
             }
         }
 
+        private bool IsUserInGroup(string username, List<ClientUserDto> users)
+        {
+            return users.Any(user => user.User == username);
+        }
+
         public void ApplyPolicy(string policies)
         {
-            var registryPolicies = JsonConvert.DeserializeObject<List<PolicyDto>>(policies);
-            var user = WindowsIdentityHelper.GetLoggedOnUsers().FirstOrDefault();
-            WriteLog($"Current User: {user.Name}");
-            WriteLog($"Current User SID: {user.Owner.Value}");
+            var registryPolicies = JsonConvert.DeserializeObject<List<RegistryPolicyDto>>(policies);            
 
             foreach (var registryPolicy in registryPolicies)
             {
-                var registryPath = registryPolicy.Path;
-                var registryEntry = registryPolicy.Entry;
-                var registryValue = registryPolicy.Value;
-                var osVersions = registryPolicy.OperatingSystem.Split(',')
-                               .Select(value => $"Windows{value.Trim()}")
-                               .ToArray();
+                var currentUsername = WindowsIdentityHelper.GetLoggedOnUsers().FirstOrDefault();
+                WriteLog($"Current User: {currentUsername.Name}");
+                WriteLog($"Current User SID: {currentUsername.Owner.Value}");
 
-                var operatingSystem = OSVersion.GetOperatingSystem();
-                if (!osVersions.Contains(operatingSystem.ToString()))
+                if (currentUsername != null && IsUserInGroup(currentUsername.Name, registryPolicy.Users))
                 {
-                    WriteLog($"Current OS is not compatible for policy. Policy: {registryEntry}");
-                    continue;
+                    WriteLog($"Current user '{currentUsername.Name}' is not authorized for the policy: {registryPolicy}");
+                    return;
                 }
 
-                WriteLog($"Applying Policy: {registryEntry}, Writing {registryPolicy.RegType} value: {registryValue}");
-
-                try
+                foreach (var appliedPolicy in registryPolicy.AppliedPolicies)
                 {
-                    string rootKey = @"HKEY_USERS\" + user.Owner.Value;
-                    string fullKey = $"{rootKey}\\{registryPath}";
+                    var registryPath = appliedPolicy.Path;
+                    var registryEntry = appliedPolicy.Entry;
+                    var registryValue = appliedPolicy.Value;
+                    var registryType = appliedPolicy.RegType;
+                    var osVersions = appliedPolicy.WindowsOperatingSystem.Split(',')
+                                   .Select(value => $"Windows{value.Trim()}")
+                                   .ToArray();
 
-                    switch (registryPolicy.RegType)
+                    var operatingSystem = OSVersion.GetOperatingSystem();
+                    if (!osVersions.Contains(operatingSystem.ToString()))
                     {
-                        case "REG_DWORD":
-                            int intValue;
-                            if (int.TryParse(registryValue, out intValue))
-                            {
-                                Registry.SetValue(fullKey, registryEntry, intValue, RegistryValueKind.DWord);
-                            }
-                            else
-                            {
-                                WriteLog($"Invalid REG_DWORD value: {intValue}");
-                            }
-                            break;
+                        WriteLog($"Current OS is not compatible for policy. Policy: {registryEntry}");
+                        continue;
+                    }
 
-                        case "REG_STRING":
-                            Registry.SetValue(fullKey, registryEntry, registryValue, RegistryValueKind.String);
-                            break;
-
-                        case "REG_BINARY":
-                            string val = registryValue.Replace("hex:", "");
-                            var data = val.Split(',')
-                                    .Select(x => Convert.ToByte(x, 16))
-                                    .ToArray();
-                            Registry.SetValue(fullKey, registryEntry, data, RegistryValueKind.Binary);
-                            break;
-
-                        default:
-                            WriteLog($"Unknown registry value type: {registryPolicy.RegType}");
-                            break;
-                    }                    
+                    WriteLog($"Applying Policy: {registryEntry}, Writing {registryType} value: {registryValue} to: {currentUsername}");
+                    WriteToRegistry(registryPath, registryEntry, registryValue, registryType, currentUsername);
                 }
-                catch (Exception ex)
+
+                foreach (var removedPolicy in registryPolicy.RemovedPolicies)
                 {
-                    WriteLog(ex.GetBaseException().Message);
-                    WriteLog(ex.Message);
+                    var registryPath = removedPolicy.Path;
+                    var registryEntry = removedPolicy.Entry;
+                    var registryValue = removedPolicy.Value;
+                    var registryType = removedPolicy.RegType;
+                    var osVersions = removedPolicy.WindowsOperatingSystem.Split(',')
+                                   .Select(value => $"Windows{value.Trim()}")
+                                   .ToArray();
+
+                    var operatingSystem = OSVersion.GetOperatingSystem();
+                    if (!osVersions.Contains(operatingSystem.ToString()))
+                    {
+                        WriteLog($"Current OS is not compatible for policy. Policy: {registryEntry}");
+                        continue;
+                    }
+
+                    WriteLog($"Removed Policy: {registryEntry}, Writing {registryType} value: {registryValue} to: {currentUsername}");
+                    WriteToRegistry(registryPath, registryEntry, registryValue, registryType, currentUsername);
                 }
+            }
+        }
+
+        public void WriteToRegistry(string registryPath, string registryEntry, string registryValue, string registryType, WindowsIdentity currentUsername)
+        {         
+            try
+            {
+                string rootKey = @"HKEY_USERS\" + currentUsername.Owner.Value;
+                string fullKey = $"{rootKey}\\{registryPath}";
+
+                switch (registryType)
+                {
+                    case "REG_DWORD":
+                        int intValue;
+                        if (int.TryParse(registryValue, out intValue))
+                        {
+                            Registry.SetValue(fullKey, registryEntry, intValue, RegistryValueKind.DWord);
+                        }
+                        else
+                        {
+                            WriteLog($"Invalid REG_DWORD value: {intValue}");
+                        }
+                        break;
+
+                    case "REG_STRING":
+                        Registry.SetValue(fullKey, registryEntry, registryValue, RegistryValueKind.String);
+                        break;
+
+                    case "REG_BINARY":
+                        string val = registryValue.Replace("hex:", "");
+                        var data = val.Split(',')
+                                .Select(x => Convert.ToByte(x, 16))
+                                .ToArray();
+                        Registry.SetValue(fullKey, registryEntry, data, RegistryValueKind.Binary);
+                        break;
+
+                    default:
+                        WriteLog($"Unknown registry value type: {registryType}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog(ex.GetBaseException().Message);
+                WriteLog(ex.Message);
             }
         }
     }
