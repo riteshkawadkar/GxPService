@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -59,7 +59,6 @@ namespace GxPService
                     {
                         errs += String.Format("OpenProcess Failed {0}, privilege not held\r\n", Marshal.GetLastWin32Error());
                     }
-
                 }
                 catch (Exception ex)
                 {

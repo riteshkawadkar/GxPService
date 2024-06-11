@@ -1,4 +1,4 @@
-﻿using GxPService.Dto;
+using GxPService.Dto;
 using Microsoft.Win32;
 using Newtonsoft.Json;
 using OSVersionExtension;
@@ -63,7 +63,6 @@ namespace GxPService
 
             // Send data to API
             //await SendDataToApi();
-            
         }
 
         private async Task SendDataToApi()
@@ -102,7 +101,6 @@ namespace GxPService
             }
         }
 
-
         public string GetApiEndpointFromRegistry()
         {
             WriteLog("Fetching API Endpoint from Registry");
@@ -121,7 +119,6 @@ namespace GxPService
             WriteLog("API Endpoint = " + (apiEndpoint ?? "Not Found"));
             return apiEndpoint;
         }
-
 
         public async Task<string> GetPoliciesFromServer(string url)
         {

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace GxPService.Dto
 {
@@ -8,5 +8,4 @@ namespace GxPService.Dto
         public List<RemovedPolicyDto> RemovedPolicies { get; set; }
         public List<ClientUserDto> Users { get; set; }
     }
-
 }

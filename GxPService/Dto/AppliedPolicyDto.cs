@@ -1,4 +1,4 @@
-﻿namespace GxPService.Dto
+namespace GxPService.Dto
 {
     public class AppliedPolicyDto
     {
@@ -9,5 +9,4 @@
         public string RegType { get; set; }
         public string WindowsOperatingSystem { get; set; }
     }
-
 }
