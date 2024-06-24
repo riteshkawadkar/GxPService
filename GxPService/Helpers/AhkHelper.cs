@@ -115,7 +115,7 @@ namespace GxPService.Helpers
 
                         if (!string.Equals(hashString, exeInfo.Hash, StringComparison.OrdinalIgnoreCase))
                         {
-                            log.Error($"The hash of {exeInfo.Path} does not match the original hash. Possible file modification.");
+                            log.Error($"The current hash {hashString} of {exeInfo.Name} does not match the original hash {exeInfo.Hash}. Possible file modification.");
                             return true;
                         }
                     }
@@ -140,7 +140,7 @@ namespace GxPService.Helpers
                         {
                             if (key == null)
                             {
-                                Registry.LocalMachine.CreateSubKey(GlobalConstants.RegistryAgentsTrustedPathKey + exeInfo.Name, true);
+                                key.CreateSubKey(GlobalConstants.RegistryAgentsTrustedPathKey + exeInfo.Name, true);
                             }
 
                             key.SetValue("TrustedLauncher", "true");
@@ -194,7 +194,7 @@ namespace GxPService.Helpers
                                 {
                                     if (key == null)
                                     {
-                                        Registry.LocalMachine.CreateSubKey(GlobalConstants.RegistryAgentsTrustedPathKey + exeInfo.Name, true);
+                                        key.CreateSubKey(GlobalConstants.RegistryAgentsTrustedPathKey + exeInfo.Name, true);
                                     }
 
                                     key.SetValue("TrustedLauncher", "true");

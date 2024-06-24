@@ -71,12 +71,12 @@ namespace GxPService
             try
             {
                 var domain = Domain.GetComputerDomain(); // Attempt to get the computer's domain
-                log.Info("Machine is connected to Domain" + domain.Name.ToString());
+                log.Info("Machine is connected to Domain - " + domain.Name.ToString());
                 return true; // If successful, the machine is connected to a domain
             }
             catch (Exception ex)
             {
-                log.Info("Machine is not connected to Domain" + ex.Message);
+                log.Error("Machine is not connected to Domain - " + ex.Message);
                 return false; // If exception occurs, the machine is not connected to a domain
             }
         }

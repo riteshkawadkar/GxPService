@@ -1,15 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using log4net;
+using System;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GxPService.Helpers
 {
     internal class ApplicationLauncher
     {
+        private static readonly ILog log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
         public enum TOKEN_INFORMATION_CLASS
         {
             TokenUser = 1,
@@ -139,7 +139,7 @@ namespace GxPService.Helpers
             uint dwSessionId, winlogonPid = 0;
             IntPtr hUserToken = IntPtr.Zero, hUserTokenDup = IntPtr.Zero, hPToken = IntPtr.Zero, hProcess = IntPtr.Zero;
 
-            Console.WriteLine("CreateProcessInConsoleSession");
+           log.Info($"CreateProcessInConsoleSession Started with cmd {CommandLine}");
             // Log the client on to the local computer.
             dwSessionId = WTSGetActiveConsoleSessionId();
 
@@ -191,13 +191,13 @@ namespace GxPService.Helpers
                     TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY
                     | TOKEN_ADJUST_SESSIONID | TOKEN_READ | TOKEN_WRITE, ref hPToken))
             {
-                Console.WriteLine(String.Format("CreateProcessInConsoleSession OpenProcessToken error: {0}",
+                log.Error(String.Format("CreateProcessInConsoleSession OpenProcessToken error: {0}",
                     Marshal.GetLastWin32Error()));
             }
 
             if (!LookupPrivilegeValue(IntPtr.Zero, SE_DEBUG_NAME, ref luid))
             {
-                Console.WriteLine(String.Format("CreateProcessInConsoleSession LookupPrivilegeValue error: {0}",
+                log.Error(String.Format("CreateProcessInConsoleSession LookupPrivilegeValue error: {0}",
                     Marshal.GetLastWin32Error()));
             }
 
@@ -208,7 +208,7 @@ namespace GxPService.Helpers
                     (int)SECURITY_IMPERSONATION_LEVEL.SecurityIdentification, (int)TOKEN_TYPE.TokenPrimary,
                     ref hUserTokenDup))
             {
-                Console.WriteLine(
+                log.Error(
                     String.Format(
                         "CreateProcessInConsoleSession DuplicateTokenEx error: {0} Token does not have the privilege.",
                         Marshal.GetLastWin32Error()));
@@ -234,7 +234,7 @@ namespace GxPService.Helpers
                     !SetTokenInformation(hUserTokenDup, TOKEN_INFORMATION_CLASS.TokenSessionId, ref dwSessionId,
                         (uint)IntPtr.Size))
                 {
-                    Console.WriteLine(
+                    log.Error(
                         String.Format(
                             "CreateProcessInConsoleSession SetTokenInformation error: {0} Token does not have the privilege.",
                             Marshal.GetLastWin32Error()));
@@ -252,14 +252,14 @@ namespace GxPService.Helpers
 
                     if (nErr == ERROR_NOT_ALL_ASSIGNED)
                     {
-                        Console.WriteLine(
+                        log.Error(
                             String.Format(
                                 "CreateProcessInConsoleSession AdjustTokenPrivileges error: {0} Token does not have the privilege.",
                                 nErr));
                     }
                     else
                     {
-                        Console.WriteLine(String.Format("CreateProcessInConsoleSession AdjustTokenPrivileges error: {0}", nErr));
+                        log.Error(String.Format("CreateProcessInConsoleSession AdjustTokenPrivileges error: {0}", nErr));
                     }
                 }
             }
