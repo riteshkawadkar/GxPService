@@ -11,6 +11,8 @@
         public const string AHKPath = @"Origami IT Lab\VShield\GxPService\AHK";
         public const string AHKFileName = "configuration.enc";
 
+        public const string PolicyFileName = "policies.enc";
+
         public const string AgentsExecutablePath = @"C:\ProgramData\Origami IT Lab\VShield\GxPService\Agents";
         public const string AgentsRunnerCode = "a13e07c188ba1fd889773096e0bfeccf";
 

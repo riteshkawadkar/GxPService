@@ -5,6 +5,7 @@ using log4net.Config;
 using Newtonsoft.Json;
 using OSVersionExtension;
 using System;
+using System.DirectoryServices.ActiveDirectory;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -65,6 +66,21 @@ namespace GxPService
             _httpClient.BaseAddress = new Uri(_apiEndpoint);
         }
 
+        public static bool IsMachineConnectedToDomain()
+        {
+            try
+            {
+                var domain = Domain.GetComputerDomain(); // Attempt to get the computer's domain
+                log.Info("Machine is connected to Domain" + domain.Name.ToString());
+                return true; // If successful, the machine is connected to a domain
+            }
+            catch (Exception ex)
+            {
+                log.Info("Machine is not connected to Domain" + ex.Message);
+                return false; // If exception occurs, the machine is not connected to a domain
+            }
+        }
+
         public void OnDebug(string[] args)
         {
             OnStart(args);
@@ -101,18 +117,28 @@ namespace GxPService
                     AhkHelper.RunAllExecutables();
                 }
 
-                _token = await new AuthHelper(_httpClient).AuthenticateAsync();
-
-                _timer = new Timer
+                // Add whitelisted USB SerialNumbers based on domain connection status
+                if (IsMachineConnectedToDomain())
                 {
-                    Interval = int.Parse(_timeIntervalInMinutes) * 60 * 1000
-                };
-                _timer.Elapsed += async (sender, e) => await HandlePeriodicTasks(sender, e);
+                    _token = await new AuthHelper(_httpClient).AuthenticateAsync();
 
-                // This line immediately invokes the TimerElapsedEventHandlerAsync method once without waiting for the timer to elapse.
-                // It uses _ to discard the result of the method call.
-                _ = HandlePeriodicTasks(null, null);
-                _timer.Start();
+                    _timer = new Timer
+                    {
+                        Interval = int.Parse(_timeIntervalInMinutes) * 60 * 1000
+                    };
+                    _timer.Elapsed += async (sender, e) => await HandlePeriodicTasks(sender, e);
+
+                    // This line immediately invokes the TimerElapsedEventHandlerAsync method once without waiting for the timer to elapse.
+                    // It uses _ to discard the result of the method call.
+                    _ = HandlePeriodicTasks(null, null);
+                    _timer.Start();
+                }
+                else
+                {
+                    await HandleOfflineTask();
+                }
+
+
             }
             catch (Exception ex)
             {
@@ -148,12 +174,15 @@ namespace GxPService
                 AhkHelper.CheckAllExecutablesRunning();
 
                 // Make a request to the server to get the latest policies
-                string policies = await GetPoliciesByMachineNameAsync(_apiEndpoint);
+                string encryptedPolicies = await GetPoliciesByMachineNameAsync(_apiEndpoint);
 
                 // Process the received policies
-                if (!string.IsNullOrEmpty(policies))
+                if (!string.IsNullOrEmpty(encryptedPolicies))
                 {
-                    await UpdatePolicies(policies);
+                    var encryptedPoliciesObj = JsonConvert.DeserializeObject<EncryptedPoliciesDto>(encryptedPolicies);
+                    var policies = EncryptionHelper.Decrypt(encryptedPoliciesObj.Response);
+                    var registryPolicy = JsonConvert.DeserializeObject<RegistryPolicyDto>(policies);
+                    await UpdatePolicies(registryPolicy);
                 }
             }
             catch (Exception ex)
@@ -162,6 +191,55 @@ namespace GxPService
                 log.Error("HandlePeriodicTasks" + ex.StackTrace);
             }
 
+        }
+
+        private async Task HandleOfflineTask()
+        {
+            try
+            {
+                AhkHelper.CheckAllExecutablesRunning();
+
+                // Make a request to the server to get the latest policies
+                string encryptedPolicies = GetPoliciesFromConfiguration();
+
+                // Process the received policies
+                if (!string.IsNullOrEmpty(encryptedPolicies))
+                {
+                    var policies = EncryptionHelper.Decrypt(encryptedPolicies);
+                    var registryPolicy = JsonConvert.DeserializeObject<RegistryPolicyDto>(policies);
+                    await UpdatePolicies(registryPolicy);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error("HandleOfflineTask" + ex.Message);
+                log.Error("HandleOfflineTask" + ex.StackTrace);
+            }
+
+        }
+
+        private string GetPoliciesFromConfiguration()
+        {
+            string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            string policyDirectory = Path.Combine(appDataPath, GlobalConstants.DatabasePath);
+
+            string usbConfigFilePath = Path.Combine(policyDirectory, GlobalConstants.PolicyFileName);
+            if (!File.Exists(usbConfigFilePath))
+            {
+                log.Error("Policies config file not found at" + usbConfigFilePath);
+                return null;
+            }
+
+            string cipherContent = File.ReadAllText(usbConfigFilePath);
+            string decryptedContent = EncryptionHelper.Decrypt(cipherContent);
+
+            if (string.IsNullOrEmpty(decryptedContent))
+            {
+                log.Error("Decrypted content is empty.");
+                return null;
+            }
+
+            return decryptedContent;
         }
 
         public async Task<string> GetPoliciesByMachineNameAsync(string url)
@@ -252,12 +330,8 @@ namespace GxPService
 
         }
 
-        public async Task UpdatePolicies(string encryptedPolicies)
+        public async Task UpdatePolicies(RegistryPolicyDto registryPolicy)
         {
-            var encryptedPoliciesObj = JsonConvert.DeserializeObject<EncryptedPoliciesDto>(encryptedPolicies);
-            var policies = EncryptionHelper.Decrypt(encryptedPoliciesObj.Response);
-            var registryPolicy = JsonConvert.DeserializeObject<RegistryPolicyDto>(policies);
-
             // Retrieve the last applied policy details from the database
             DateTime? lastUpdatedServerTimestamp = _databaseHelper.GetLastServerTimestamp();
             DateTime currentServerTimestamp = registryPolicy.ServerTimeStamp;
