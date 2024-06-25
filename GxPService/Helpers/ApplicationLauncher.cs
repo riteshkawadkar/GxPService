@@ -130,7 +130,7 @@ namespace GxPService.Helpers
         [DllImport("userenv.dll", SetLastError = true)]
         public static extern bool CreateEnvironmentBlock(ref IntPtr lpEnvironment, IntPtr hToken, bool bInherit);
 
-        public static bool CreateProcessInConsoleSession(String CommandLine, bool bElevate)
+        public static bool CreateProcessInConsoleSession_OLD(String CommandLine, bool bElevate)
         {
 
             PROCESS_INFORMATION pi;
@@ -299,6 +299,169 @@ namespace GxPService.Helpers
             CloseHandle(hPToken);
 
             return (iResultOfCreateProcessAsUser == 0) ? true : false;
+        }
+
+        public static bool CreateProcessInConsoleSession(String CommandLine, bool bElevate)
+        {
+            PROCESS_INFORMATION pi;
+            bool bResult = false;
+            uint dwSessionId, winlogonPid = 0;
+            IntPtr hUserToken = IntPtr.Zero, hUserTokenDup = IntPtr.Zero, hPToken = IntPtr.Zero, hProcess = IntPtr.Zero;
+
+            log.Info($"CreateProcessInConsoleSession Started with cmd {CommandLine}");
+            dwSessionId = WTSGetActiveConsoleSessionId();
+
+            // Find the winlogon process
+            var procEntry = new PROCESSENTRY32();
+            IntPtr hSnap = (IntPtr)CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if (hSnap == (IntPtr)INVALID_HANDLE_VALUE)
+            {
+                log.Error("CreateProcessInConsoleSession CreateToolhelp32Snapshot error: INVALID_HANDLE_VALUE");
+                return false;
+            }
+
+            procEntry.dwSize = (uint)Marshal.SizeOf(procEntry);
+
+            if (Process32First((uint)hSnap, ref procEntry) == 0)
+            {
+                CloseHandle(hSnap);
+                log.Error("CreateProcessInConsoleSession Process32First error");
+                return false;
+            }
+
+            do
+            {
+                if (procEntry.szExeFile.IndexOf("explorer.exe", StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    uint winlogonSessId = 0;
+                    if (ProcessIdToSessionId(procEntry.th32ProcessID, ref winlogonSessId) && winlogonSessId == dwSessionId)
+                    {
+                        winlogonPid = procEntry.th32ProcessID;
+                        break;
+                    }
+                }
+            }
+            while (Process32Next((uint)hSnap, ref procEntry) != 0);
+
+            CloseHandle(hSnap);
+
+            if (winlogonPid == 0)
+            {
+                log.Error("CreateProcessInConsoleSession Winlogon process not found");
+                return false;
+            }
+
+            WTSQueryUserToken(dwSessionId, ref hUserToken);
+
+            var si = new STARTUPINFO();
+            si.cb = Marshal.SizeOf(si);
+            si.lpDesktop = "winsta0\\default";
+            var tp = new TOKEN_PRIVILEGES();
+            var luid = new LUID();
+            hProcess = OpenProcess(MAXIMUM_ALLOWED, false, winlogonPid);
+
+            if (hProcess == IntPtr.Zero)
+            {
+                log.Error("CreateProcessInConsoleSession OpenProcess error: INVALID_HANDLE_VALUE");
+                return false;
+            }
+
+            if (!OpenProcessToken(hProcess,
+                    TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY | TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY
+                    | TOKEN_ADJUST_SESSIONID | TOKEN_READ | TOKEN_WRITE, ref hPToken))
+            {
+                log.Error($"CreateProcessInConsoleSession OpenProcessToken error: {Marshal.GetLastWin32Error()}");
+                CloseHandle(hProcess);
+                return false;
+            }
+
+            if (!LookupPrivilegeValue(IntPtr.Zero, SE_DEBUG_NAME, ref luid))
+            {
+                log.Error($"CreateProcessInConsoleSession LookupPrivilegeValue error: {Marshal.GetLastWin32Error()}");
+                CloseHandle(hProcess);
+                CloseHandle(hPToken);
+                return false;
+            }
+
+            var sa = new SECURITY_ATTRIBUTES();
+            sa.Length = Marshal.SizeOf(sa);
+
+            if (!DuplicateTokenEx(hPToken, MAXIMUM_ALLOWED, ref sa,
+                    (int)SECURITY_IMPERSONATION_LEVEL.SecurityIdentification, (int)TOKEN_TYPE.TokenPrimary,
+                    ref hUserTokenDup))
+            {
+                log.Error($"CreateProcessInConsoleSession DuplicateTokenEx error: {Marshal.GetLastWin32Error()} Token does not have the privilege.");
+                CloseHandle(hProcess);
+                CloseHandle(hUserToken);
+                CloseHandle(hPToken);
+                return false;
+            }
+
+            if (bElevate)
+            {
+                tp.PrivilegeCount = 1;
+                tp.Privileges = new int[3];
+                tp.Privileges[2] = SE_PRIVILEGE_ENABLED;
+                tp.Privileges[1] = luid.HighPart;
+                tp.Privileges[0] = luid.LowPart;
+
+                if (!SetTokenInformation(hUserTokenDup, TOKEN_INFORMATION_CLASS.TokenSessionId, ref dwSessionId,
+                        (uint)IntPtr.Size))
+                {
+                    log.Error($"CreateProcessInConsoleSession SetTokenInformation error: {Marshal.GetLastWin32Error()} Token does not have the privilege.");
+                }
+
+                if (!AdjustTokenPrivileges(hUserTokenDup, false, ref tp, Marshal.SizeOf(tp), IntPtr.Zero, IntPtr.Zero))
+                {
+                    int nErr = Marshal.GetLastWin32Error();
+
+                    if (nErr == ERROR_NOT_ALL_ASSIGNED)
+                    {
+                        log.Error($"CreateProcessInConsoleSession AdjustTokenPrivileges error: {nErr} Token does not have the privilege.");
+                    }
+                    else
+                    {
+                        log.Error($"CreateProcessInConsoleSession AdjustTokenPrivileges error: {nErr}");
+                    }
+                }
+            }
+
+            uint dwCreationFlags = NORMAL_PRIORITY_CLASS | CREATE_NEW_CONSOLE;
+            IntPtr pEnv = IntPtr.Zero;
+            if (CreateEnvironmentBlock(ref pEnv, hUserTokenDup, true))
+            {
+                dwCreationFlags |= CREATE_UNICODE_ENVIRONMENT;
+            }
+            else
+            {
+                pEnv = IntPtr.Zero;
+            }
+
+            bResult = CreateProcessAsUser(hUserTokenDup,
+                null,
+                CommandLine,
+                ref sa,
+                ref sa,
+                false,
+                (int)dwCreationFlags,
+                pEnv,
+                null,
+                ref si,
+                out pi);
+
+            int iResultOfCreateProcessAsUser = Marshal.GetLastWin32Error();
+
+            CloseHandle(hProcess);
+            CloseHandle(hUserToken);
+            CloseHandle(hUserTokenDup);
+            CloseHandle(hPToken);
+
+            if (iResultOfCreateProcessAsUser != 0)
+            {
+                log.Error($"CreateProcessInConsoleSession CreateProcessAsUser error: {iResultOfCreateProcessAsUser}");
+            }
+
+            return bResult;
         }
 
         [DllImport("kernel32.dll")]

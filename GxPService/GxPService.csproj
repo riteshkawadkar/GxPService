@@ -192,30 +192,14 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
-    <None Include="Scripts\kproc.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\mproc.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\qat.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\ribbon.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\ribbon11.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\ribbon7.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\rns.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="Scripts\StartShell.ahk">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
+    <None Include="Scripts\kproc.ahk" />
+    <None Include="Scripts\mproc.ahk" />
+    <None Include="Scripts\qat.ahk" />
+    <None Include="Scripts\ribbon.ahk" />
+    <None Include="Scripts\ribbon11.ahk" />
+    <None Include="Scripts\ribbon7.ahk" />
+    <None Include="Scripts\rns.ahk" />
+    <None Include="Scripts\StartShell.ahk" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Agents\kproc.exe">
